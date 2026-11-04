@@ -13,7 +13,7 @@ command -v node >/dev/null 2>&1 || fail 'Node.js 22 or newer is required.'
 node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
 [ "$node_major" -ge 22 ] || fail 'Node.js 22 or newer is required.'
 
-version=${RECURRENCE_VERSION:-v0.2.0}
+version=${RECURRENCE_VERSION:-v0.3.0}
 case "$version" in
   v[0-9]*) ;;
   *) fail 'RECURRENCE_VERSION must be a release tag such as v0.1.0.' ;;
@@ -46,18 +46,47 @@ trap 'rm -rf "$temp_dir"' EXIT
 trap 'exit 1' HUP INT TERM
 
 archive=$temp_dir/source.tar.gz
-url=https://codeload.github.com/Open-Interaction/recurrence-cli/tar.gz/refs/tags/$version
+asset=
+case "$version" in
+  v0.1.*|v0.2.*)
+    url=https://codeload.github.com/Open-Interaction/recurrence-cli/tar.gz/refs/tags/$version
+    source_dir=$temp_dir/recurrence-cli-${version#v}
+    ;;
+  *)
+    asset=recurrence-cli-${version#v}.tgz
+    url=https://github.com/Open-Interaction/recurrence-cli/releases/download/$version/$asset
+    source_dir=$temp_dir/package
+    curl --proto '=https' --proto-redir '=https' -fsSL \
+      "https://github.com/Open-Interaction/recurrence-cli/releases/download/$version/SHA256SUMS" -o "$temp_dir/SHA256SUMS"
+    ;;
+esac
 curl --proto '=https' --proto-redir '=https' -fsSL "$url" -o "$archive"
+if [ -n "${asset:-}" ]; then
+  node --input-type=module -e '
+    import { createHash } from "node:crypto";
+    import { readFileSync } from "node:fs";
+    const [archive, sums, name] = process.argv.slice(1);
+    const expected = readFileSync(sums, "utf8").split(/\r?\n/).find(line => line.endsWith(`  ${name}`))?.split("  ")[0];
+    const actual = createHash("sha256").update(readFileSync(archive)).digest("hex");
+    if (!expected || actual !== expected) { console.error("Release checksum verification failed."); process.exit(1); }
+  ' "$archive" "$temp_dir/SHA256SUMS" "$asset"
+fi
 tar -xzf "$archive" -C "$temp_dir"
-source_dir=$temp_dir/recurrence-cli-${version#v}
 [ -f "$source_dir/bin/recurrence.mjs" ] || fail 'The release archive is missing the CLI entrypoint.'
-[ -f "$source_dir/src/cli.mjs" ] || fail 'The release archive is missing the CLI source.'
 node -e 'if (require(process.argv[1]).version !== process.argv[2]) process.exit(1)' \
   "$source_dir/package.json" "${version#v}" || fail 'The release archive version does not match its tag.'
 
-mkdir -p "$target/bin" "$target/src"
+if [ -n "${asset:-}" ]; then
+  [ -f "$source_dir/dist/cli.mjs" ] || fail 'The release archive is missing the bundled runtime.'
+  mkdir -p "$target/dist"
+  cp -R "$source_dir/dist/." "$target/dist/"
+else
+  [ -f "$source_dir/src/cli.mjs" ] || fail 'The release archive is missing the CLI source.'
+  mkdir -p "$target/src"
+  cp "$source_dir/src/"*.mjs "$target/src/"
+fi
+mkdir -p "$target/bin"
 cp "$source_dir/bin/recurrence.mjs" "$target/bin/recurrence.mjs"
-cp "$source_dir/src/"*.mjs "$target/src/"
 cp "$source_dir/package.json" "$target/package.json"
 chmod 755 "$target/bin/recurrence.mjs"
 ln -sfn "$target/bin/recurrence.mjs" "$link"

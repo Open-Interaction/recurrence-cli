@@ -1,6 +1,6 @@
 {
   "name": "recurrence-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "repository": {
@@ -10,13 +10,27 @@
   "bin": {
     "recurrence": "./bin/recurrence.mjs"
   },
-  "files": ["bin", "src", "README.md"],
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "scripts",
+    "README.md"
+  ],
   "scripts": {
     "start": "node bin/recurrence.mjs",
-    "test": "node --test",
-    "typecheck": "node --check bin/recurrence.mjs && node --check src/cli.mjs && node --check src/credentials.mjs"
+    "build": "node scripts/build.mjs",
+    "prepare": "node scripts/build.mjs",
+    "test": "node scripts/build.mjs && node --test",
+    "typecheck": "node scripts/check.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "esbuild": "0.28.2",
+    "zod": "4.6.7"
   }
 }

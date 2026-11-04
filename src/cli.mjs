@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { loadKey, promptKey, removeKey, saveKey, validKey } from "./credentials.mjs";
 
-const DEFAULT_ORIGIN = "https://open-interaction.fly.dev";
+import { createApiClient, DEFAULT_ORIGIN, UsageError, validateIdempotencyKey } from "./api.mjs";
 const USAGE = `Usage: recurrence <command> [options]
 
 Commands:
   auth login                     Save a platform API key with a hidden prompt
   auth status                    Show the active credential source
   auth logout                    Remove the locally saved key
+  mcp                            Start the MCP server over stdio
   models                         List available decision models
   decide --file PATH             Submit a JSON decision request (PATH can be - for stdin)
          [--idempotency-key ID]  Reuse the same ID when retrying a request
@@ -22,8 +23,6 @@ Environment:
   RECURRENCE_API_ORIGIN          API origin (default: ${DEFAULT_ORIGIN})
 `;
 
-class UsageError extends Error {}
-
 function options(args, allowed) {
   const parsed = {};
   for (let index = 0; index < args.length; index += 2) {
@@ -34,18 +33,6 @@ function options(args, allowed) {
     parsed[option] = args[index + 1];
   }
   return parsed;
-}
-
-function apiOrigin(value) {
-  let url;
-  try { url = new URL(value); }
-  catch { throw new UsageError("RECURRENCE_API_ORIGIN must be a valid URL."); }
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) || url.username || url.password
-    || url.pathname !== "/" || url.search || url.hash) {
-    throw new UsageError("RECURRENCE_API_ORIGIN must be an HTTPS origin (HTTP is allowed for localhost only).");
-  }
-  return url.origin;
 }
 
 async function readDecision(file, stdin) {
@@ -66,31 +53,6 @@ async function readDecision(file, stdin) {
   } catch (error) {
     throw new UsageError(`Invalid decision JSON: ${error.message}`);
   }
-}
-
-async function request(fetcher, origin, path, key, method = "GET", payload, idempotencyKey) {
-  let response;
-  try {
-    response = await fetcher(`${origin}${path}`, {
-      method, redirect: "error", signal: AbortSignal.timeout(method === "POST" ? 120_000 : 20_000),
-      headers: {
-        ...(key ? { Authorization: `Bearer ${key}` } : {}),
-        ...(payload ? { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey } : {}),
-      },
-      ...(payload ? { body: JSON.stringify(payload) } : {}),
-    });
-  } catch (error) {
-    throw new Error(`Network request failed: ${error.message}`);
-  }
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    const code = body?.error?.code ?? `HTTP_${response.status}`;
-    const message = body?.error?.message ?? `Request failed with HTTP ${response.status}`;
-    const requestId = response.headers.get("x-decision-request-id");
-    throw new Error(`${code}: ${message}${requestId ? ` (request ${requestId})` : ""}`);
-  }
-  if (body === null) throw new Error("API returned invalid JSON.");
-  return body;
 }
 
 export async function run(argv, { env = process.env, fetcher = globalThis.fetch, stdout = process.stdout,
@@ -130,37 +92,40 @@ export async function run(argv, { env = process.env, fetcher = globalThis.fetch,
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return 0;
     }
+    if (command === "mcp") {
+      if (args.length) throw new UsageError("mcp takes no arguments.");
+      const metadata = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+      const { startMcp } = await import("./mcp.mjs");
+      startMcp({ env, fetcher, version: metadata.version, stderr });
+      return 0;
+    }
     if (!["models", "decide", "status", "activity", "balance"].includes(command)) {
       throw new UsageError(`Unknown command: ${command}`);
     }
-    const origin = apiOrigin(env.RECURRENCE_API_ORIGIN || DEFAULT_ORIGIN);
-    const key = command === "models" ? undefined : environmentKey || await loadKey(env);
-    if (command !== "models" && !key) throw new UsageError("Run recurrence auth login or set RECURRENCE_API_KEY.");
+    const api = createApiClient({ env, fetcher });
     let result;
     if (command === "models") {
       if (args.length) throw new UsageError("models takes no arguments.");
-      result = await request(fetcher, origin, "/v1/models");
+      result = await api.models();
     } else if (command === "balance") {
       if (args.length) throw new UsageError("balance takes no arguments.");
-      result = await request(fetcher, origin, "/v1/billing/preview", key);
+      result = await api.balance();
     } else if (command === "activity") {
       const parsed = options(args, ["--limit"]);
       const limit = parsed["--limit"] ?? "20";
       if (!/^(?:[1-9]|[1-9][0-9]|100)$/.test(limit)) throw new UsageError("--limit must be an integer from 1 to 100.");
-      result = await request(fetcher, origin, `/v1/decisions?limit=${limit}`, key);
+      result = await api.activity(Number(limit));
     } else if (command === "status") {
       if (args.length !== 1 || !args[0] || args[0].startsWith("--")) throw new UsageError("status requires one request ID.");
-      result = await request(fetcher, origin, `/v1/decisions/${encodeURIComponent(args[0])}`, key);
+      result = await api.status(args[0]);
     } else if (command === "decide") {
       const parsed = options(args, ["--file", "--idempotency-key"]);
       if (!parsed["--file"]) throw new UsageError("decide requires --file PATH.");
       const idempotencyKey = parsed["--idempotency-key"] ?? randomUUID();
-      if (idempotencyKey.length < 8 || idempotencyKey.length > 128 || /\s/.test(idempotencyKey)) {
-        throw new UsageError("--idempotency-key must be 8–128 characters without whitespace.");
-      }
+      validateIdempotencyKey(idempotencyKey);
       const payload = await readDecision(parsed["--file"], stdin);
       stderr.write(`Idempotency-Key: ${idempotencyKey}\n`);
-      result = await request(fetcher, origin, "/v1/decisions", key, "POST", payload, idempotencyKey);
+      result = await api.decide(payload, idempotencyKey);
     } else throw new UsageError(`Unknown command: ${command}`);
     stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
