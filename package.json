@@ -1,0 +1,22 @@
+{
+  "name": "recurrence-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Open-Interaction/recurrence-cli.git"
+  },
+  "bin": {
+    "recurrence": "./bin/recurrence.mjs"
+  },
+  "files": ["bin", "src", "README.md"],
+  "scripts": {
+    "start": "node bin/recurrence.mjs",
+    "test": "node --test",
+    "typecheck": "node --check bin/recurrence.mjs && node --check src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
