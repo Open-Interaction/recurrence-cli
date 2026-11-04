@@ -1,19 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { loadKey, promptKey, removeKey, saveKey, validKey } from "./credentials.mjs";
 
 const DEFAULT_ORIGIN = "https://open-interaction.fly.dev";
 const USAGE = `Usage: recurrence <command> [options]
 
 Commands:
+  auth login                     Save a platform API key with a hidden prompt
+  auth status                    Show the active credential source
+  auth logout                    Remove the locally saved key
   models                         List available decision models
   decide --file PATH             Submit a JSON decision request (PATH can be - for stdin)
          [--idempotency-key ID]  Reuse the same ID when retrying a request
   status REQUEST_ID              Get one decision request status
   activity [--limit N]           List recent requests (1–100, default 20)
   balance                        Show account credit and usage
+  --version                      Show CLI version
 
 Environment:
-  RECURRENCE_API_KEY             Platform API key (required except for models)
+  RECURRENCE_API_KEY             Platform API key (overrides the locally saved key)
   RECURRENCE_API_ORIGIN          API origin (default: ${DEFAULT_ORIGIN})
 `;
 
@@ -53,6 +58,7 @@ async function readDecision(file, stdin) {
   } catch (error) {
     throw new UsageError(`Cannot read decision file: ${error.message}`);
   }
+  if (Buffer.byteLength(source, "utf8") > 128 * 1024) throw new UsageError("Decision JSON must be at most 128 KiB.");
   try {
     const value = JSON.parse(source);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected a JSON object");
@@ -88,7 +94,7 @@ async function request(fetcher, origin, path, key, method = "GET", payload, idem
 }
 
 export async function run(argv, { env = process.env, fetcher = globalThis.fetch, stdout = process.stdout,
-  stderr = process.stderr, stdin = process.stdin } = {}) {
+  stderr = process.stderr, stdin = process.stdin, promptSecret = promptKey } = {}) {
   try {
     const [command, ...args] = argv;
     if (command === "help" || command === "--help" || command === "-h") {
@@ -97,9 +103,39 @@ export async function run(argv, { env = process.env, fetcher = globalThis.fetch,
       return 0;
     }
     if (!command) throw new UsageError("Choose a command.");
+    if (command === "--version" || command === "version") {
+      if (args.length) throw new UsageError("Version takes no arguments.");
+      const metadata = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+      stdout.write(`${metadata.version}\n`);
+      return 0;
+    }
+    const environmentKey = env.RECURRENCE_API_KEY?.trim();
+    if (command === "auth") {
+      if (args.length !== 1 || !["login", "status", "logout"].includes(args[0])) {
+        throw new UsageError("Use auth login, auth status, or auth logout.");
+      }
+      let result;
+      if (args[0] === "login") {
+        const enteredKey = (await promptSecret(stdin, stderr)).trim();
+        if (!validKey(enteredKey)) throw new UsageError("Expected a platform API key beginning with oi_sk_.");
+        await saveKey(env, enteredKey);
+        result = { saved: true, source: "file", environmentOverrideActive: Boolean(environmentKey) };
+      } else if (args[0] === "logout") {
+        result = { removed: await removeKey(env), environmentOverrideActive: Boolean(environmentKey) };
+      } else {
+        const activeKey = environmentKey || await loadKey(env);
+        result = { configured: Boolean(activeKey), source: activeKey ? environmentKey ? "environment" : "file" : null,
+          prefix: activeKey?.slice(0, 18) ?? null };
+      }
+      stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return 0;
+    }
+    if (!["models", "decide", "status", "activity", "balance"].includes(command)) {
+      throw new UsageError(`Unknown command: ${command}`);
+    }
     const origin = apiOrigin(env.RECURRENCE_API_ORIGIN || DEFAULT_ORIGIN);
-    const key = env.RECURRENCE_API_KEY?.trim();
-    if (command !== "models" && !key) throw new UsageError("Set RECURRENCE_API_KEY in your environment.");
+    const key = command === "models" ? undefined : environmentKey || await loadKey(env);
+    if (command !== "models" && !key) throw new UsageError("Run recurrence auth login or set RECURRENCE_API_KEY.");
     let result;
     if (command === "models") {
       if (args.length) throw new UsageError("models takes no arguments.");

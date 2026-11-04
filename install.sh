@@ -13,7 +13,7 @@ command -v node >/dev/null 2>&1 || fail 'Node.js 22 or newer is required.'
 node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
 [ "$node_major" -ge 22 ] || fail 'Node.js 22 or newer is required.'
 
-version=${RECURRENCE_VERSION:-v0.1.0}
+version=${RECURRENCE_VERSION:-v0.2.0}
 case "$version" in
   v[0-9]*) ;;
   *) fail 'RECURRENCE_VERSION must be a release tag such as v0.1.0.' ;;
@@ -57,7 +57,7 @@ node -e 'if (require(process.argv[1]).version !== process.argv[2]) process.exit(
 
 mkdir -p "$target/bin" "$target/src"
 cp "$source_dir/bin/recurrence.mjs" "$target/bin/recurrence.mjs"
-cp "$source_dir/src/cli.mjs" "$target/src/cli.mjs"
+cp "$source_dir/src/"*.mjs "$target/src/"
 cp "$source_dir/package.json" "$target/package.json"
 chmod 755 "$target/bin/recurrence.mjs"
 ln -sfn "$target/bin/recurrence.mjs" "$link"
