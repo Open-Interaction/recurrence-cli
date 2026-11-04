@@ -2,7 +2,7 @@
 
 ## Install
 
-With Node.js 22 or newer, install the latest version supported by the installer without npm or Git:
+With Node.js 22 or newer, install the latest published release without npm or Git:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Open-Interaction/recurrence-cli/main/install.sh | sh
@@ -10,7 +10,7 @@ export PATH="$HOME/.local/bin:$PATH"
 recurrence --help
 ```
 
-The installer downloads the versioned Release package over HTTPS, verifies its SHA-256 checksum, and installs it in `~/.local/bin` and `~/.local/share/recurrence-cli`. The package includes the MCP runtime and needs no npm install. Add `~/.local/bin` to your `PATH` if needed, then rerun the command to update. To install a specific release or choose another location:
+The installer resolves GitHub's Latest Release, downloads its package over HTTPS, verifies its SHA-256 checksum, and installs it in `~/.local/bin` and `~/.local/share/recurrence-cli`. The package includes the MCP runtime and needs no npm install. Add `~/.local/bin` to your `PATH` if needed, then rerun the command to update. To install a specific release or choose another location:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Open-Interaction/recurrence-cli/main/install.sh | RECURRENCE_VERSION=v0.3.0 RECURRENCE_INSTALL_PREFIX="$HOME/.local" sh
@@ -103,6 +103,12 @@ The host must have Node.js 22+ on its PATH and access to the same home/config di
 
 ## Development and release
 
-In the standalone repository, `npm install` builds the bundled runtime via `prepare`; `npm test` runs CLI and MCP tests. In the private monorepo, use `pnpm --filter recurrence-cli build` and `pnpm --filter recurrence-cli test`. The MCP tests use the official SDK client over both in-memory and real stdio transports against a local mock API.
+This repository mirrors an explicit file list from the platform's `apps/cli` directory. Maintainers make source changes there; its main-branch workflow tests and synchronizes the public source. The generated `.recurrence-sync-manifest.json` tracks managed files so retired files can be removed without affecting unrelated public content.
 
-Build before packaging: `npm run build`, then `npm pack --ignore-scripts`. Attach `recurrence-cli-VERSION.tgz` and a `SHA256SUMS` file containing its SHA-256 hash to the matching GitHub Release. Publish the assets before updating the installer's default version on `main`. The package includes bundled third-party license notices in `dist/THIRD_PARTY_NOTICES.txt`.
+For standalone CI/builds, use `npm ci --ignore-scripts`, then `npm test` and `npm run typecheck`. `package-lock.json` fixes that dependency graph; the private monorepo continues to use its root pnpm lock for workspace development. The MCP tests use the official SDK client over both in-memory and real stdio transports against a local mock API.
+
+To release, increase `package.json` and `package-lock.json` to a new stable version, add the matching `CHANGELOG.md` section, and merge the source change. Once synchronized to public `main`, the version change automatically starts **CLI release**. That workflow tests, packs, verifies the extracted runtime, creates the tag and a draft Release, uploads and checks the exact package/checksum assets, and then publishes it as Latest. The installer follows that published pointer automatically. Published tags and assets are never replaced.
+
+For a build-only rehearsal, run **Actions → CLI release → Run workflow** with `publish` unchecked. To retry a release, use the same workflow with `publish` checked. Matching draft uploads are reused; existing published versions are verified, and conflicting tags or assets stop the run. A post-publication installer check can fail after publication; inspect the log and rerun verification rather than replacing the assets.
+
+For local package validation, run `node scripts/release.mjs prepare`. It writes the package, checksums, source manifest, and release notes under ignored `release/`. Publishing runs only in the public main-branch GitHub Actions job. The package includes third-party license notices in `dist/THIRD_PARTY_NOTICES.txt`.

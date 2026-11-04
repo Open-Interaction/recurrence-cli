@@ -13,7 +13,12 @@ command -v node >/dev/null 2>&1 || fail 'Node.js 22 or newer is required.'
 node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
 [ "$node_major" -ge 22 ] || fail 'Node.js 22 or newer is required.'
 
-version=${RECURRENCE_VERSION:-v0.3.0}
+version=${RECURRENCE_VERSION:-latest}
+if [ "$version" = latest ]; then
+  latest_url=$(curl --proto '=https' --proto-redir '=https' -fsSL -o /dev/null -w '%{url_effective}' \
+    https://github.com/Open-Interaction/recurrence-cli/releases/latest)
+  version=${latest_url##*/}
+fi
 case "$version" in
   v[0-9]*) ;;
   *) fail 'RECURRENCE_VERSION must be a release tag such as v0.1.0.' ;;

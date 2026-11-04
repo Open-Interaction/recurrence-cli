@@ -141,7 +141,8 @@ test("prints package version without credentials or a network request", async ()
   const stdout = capture();
   assert.equal(await run(["--version"], { env: {}, stdout: stdout.stream, stderr: capture().stream,
     fetcher: async () => { throw new Error("unexpected fetch"); } }), 0);
-  assert.equal(stdout.text(), "0.3.0\n");
+  const metadata = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(stdout.text(), `${metadata.version}\n`);
 });
 
 test("reports unknown commands and oversized input before making a request", async () => {
