@@ -101,9 +101,28 @@ For clients accepting `mcpServers` JSON, replace the path below with the absolut
 
 The host must have Node.js 22+ on its PATH and access to the same home/config directory used for login. When running under another user or in a container, pass `RECURRENCE_API_KEY` through the host's secret/environment settings. Configure the host's tool timeout to allow the API's 120-second decision timeout. After configuration, restart or reconnect the host and ask it to list Recurrence models first.
 
+## Agent skill
+
+The [Recurrence skill](skills/recurrence/SKILL.md) helps an agent decide when to use Recurrence, choose a model from the live catalog, and recover an interrupted request. It prefers the connected MCP server and can also use the CLI. Install the CLI and run `recurrence auth login` before making decisions. A decision can use account credit.
+
+To install the skill for Codex, run these commands from a directory where you can clone the repository:
+
+```sh
+git clone --depth 1 https://github.com/Open-Interaction/recurrence-cli.git
+recurrence_skill_dir="${CODEX_HOME:-$HOME/.codex}/skills/recurrence"
+mkdir -p "$recurrence_skill_dir"
+cp -R recurrence-cli/skills/recurrence/. "$recurrence_skill_dir/"
+```
+
+Open a new Codex session and try this prompt:
+
+> Use `$recurrence` to classify the ticket “I was charged twice for the same invoice” as `billing`, `technical`, or `other`. Choose a model from the live catalog and report the label, model, request ID, and charge.
+
+If the response is lost, keep the original model, payload, and idempotency key. Check status first if you have a decision ID. See the [decision input guide](skills/recurrence/references/decision-input.md) for a complete example and the [skill](skills/recurrence/SKILL.md#recover-safely) for when to replay or stop.
+
 ## Development and release
 
-This repository mirrors an explicit file list from the platform's `apps/cli` directory. Maintainers make source changes there; its main-branch workflow tests and synchronizes the public source. The generated `.recurrence-sync-manifest.json` tracks managed files so retired files can be removed without affecting unrelated public content.
+This repository mirrors the platform's `apps/cli` directory. Maintainers make source changes there and sync them to this public repository.
 
 For standalone CI/builds, use `npm ci --ignore-scripts`, then `npm test` and `npm run typecheck`. `package-lock.json` fixes that dependency graph; the private monorepo continues to use its root pnpm lock for workspace development. The MCP tests use the official SDK client over both in-memory and real stdio transports against a local mock API.
 
